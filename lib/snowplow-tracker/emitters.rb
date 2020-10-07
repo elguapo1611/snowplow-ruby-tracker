@@ -48,9 +48,15 @@ module SnowplowTracker
 
     Contract String, @@StrictConfigHash => lambda { |x| x.is_a? Emitter }
     def initialize(endpoint, config={})
+      
       config = @@DefaultConfig.merge(config)
       @lock = Monitor.new
       @collector_uri = as_collector_uri(endpoint, config[:protocol], config[:port], config[:method])
+      destination = URI(@collector_uri)
+      @conn = Faraday.new(
+        url: destination.host,
+        headers: {'Content-Type' => 'application/json; charset=utf-8'}
+      )
       @buffer = []
       if not config[:buffer_size].nil?
         @buffer_size = config[:buffer_size]
@@ -195,19 +201,12 @@ module SnowplowTracker
     def http_post(payload)
       LOGGER.info("Sending POST request to #{@collector_uri}...")
       LOGGER.debug("Payload: #{payload}")
-      destination = URI(@collector_uri)
-      http = Net::HTTP.new(destination.host, destination.port)
-      request = Net::HTTP::Post.new(destination.request_uri)
-      if destination.scheme == 'https'
-        http.use_ssl = true
+      response = @conn.post(destination.request_uri) do |req|
+        req.body = payload.to_json
       end
-      request.body = payload.to_json
-      request.set_content_type('application/json; charset=utf-8')
-      response = http.request(request)
       LOGGER.add(is_good_status_code(response.code) ? Logger::INFO : Logger::WARN) {
         "POST request to #{@collector_uri} finished with status code #{response.code}"
       }
-
       response
     end
 
